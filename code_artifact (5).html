@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="ko" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 구글 시트 인포그래픽 대시보드</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PapaParse for robust CSV processing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Pretendard', sans-serif; }
+        .glass-card {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(51, 65, 85, 0.8);
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(71, 85, 105, 1);
+        }
+    </style>
+</head>
+<body class="h-full min-h-screen flex flex-col bg-slate-950 text-slate-100 antialiased selection:bg-sky-500 selection:text-white custom-scrollbar">
+
+    <!-- Top Navigation Header -->
+    <header class="sticky top-0 z-30 bg-slate-900/90 border-b border-slate-800/80 backdrop-blur-md px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <div class="p-2.5 bg-gradient-to-tr from-sky-500 to-indigo-600 rounded-xl shadow-lg shadow-sky-500/20 text-white font-bold text-lg">
+                <i class="fa-solid fa-chart-line"></i>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold text-white flex items-center gap-2">
+                    실시간 인포그래픽 대시보드
+                    <span id="syncBadge" class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span id="syncStatusText">동기화 완료</span>
+                    </span>
+                </h1>
+                <p class="text-xs text-slate-400">구글 스프레드시트 데이터 실시간 시각화 엔진</p>
+            </div>
+        </div>
+
+        <!-- Sync Controls & Settings -->
+        <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg p-1 text-xs text-slate-300">
+                <span class="px-2 text-slate-400"><i class="fa-regular fa-clock mr-1"></i>자동 갱신:</span>
+                <select id="autoRefreshInterval" class="bg-slate-900 text-slate-200 text-xs rounded px-2 py-1 outline-none border border-slate-700 focus:border-sky-500 transition">
+                    <option value="0">수동</option>
+                    <option value="15000">15초</option>
+                    <option value="30000" selected>30초</option>
+                    <option value="60000">1분</option>
+                    <option value="300000">5분</option>
+                </select>
+            </div>
+
+            <button id="refreshBtn" onclick="fetchLiveData()" class="flex items-center gap-2 bg-sky-600 hover:bg-sky-500 text-white font-medium text-xs px-3.5 py-2 rounded-lg transition shadow-md shadow-sky-600/20 active:scale-95">
+                <i id="refreshIcon" class="fa-solid fa-arrows-rotate"></i>
+                <span>지금 새로고침</span>
+            </button>
+
+            <button onclick="toggleUrlModal()" class="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium text-xs px-3 py-2 rounded-lg transition">
+                <i class="fa-solid fa-link text-slate-400"></i>
+                <span>URL 설정</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Secondary Controls & Filter Bar -->
+    <div class="bg-slate-900/50 border-b border-slate-800/60 px-4 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex flex-wrap items-center gap-3 text-xs w-full lg:w-auto">
+            <!-- Search Bar -->
+            <div class="relative min-w-[240px] flex-1 lg:flex-none">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                <input type="text" id="searchInput" oninput="applyFilters()" placeholder="데이터 검색어 입력..." class="w-full bg-slate-800/80 border border-slate-700 rounded-lg pl-9 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition">
+            </div>
+
+            <!-- Dynamic Category Filter Dropdown -->
+            <div class="flex items-center gap-2">
+                <span class="text-slate-400 font-medium"><i class="fa-solid fa-filter mr-1"></i>그룹:</span>
+                <select id="groupColumnSelect" onchange="onAxisChange()" class="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-sky-500 transition">
+                    <option value="">자동 감지 중...</option>
+                </select>
+            </div>
+
+            <!-- Dynamic Metric Selector -->
+            <div class="flex items-center gap-2">
+                <span class="text-slate-400 font-medium"><i class="fa-solid fa-calculator mr-1"></i>측정항목:</span>
+                <select id="metricColumnSelect" onchange="onAxisChange()" class="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-sky-500 transition">
+                    <option value="">자동 감지 중...</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3 text-xs text-slate-400 ml-auto">
+            <span>최종 업데이트: <strong id="lastUpdatedTime" class="text-slate-200 font-normal">-</strong></span>
+            <span class="h-3 w-px bg-slate-800"></span>
+            <span>총 행 수: <strong id="rowCountBadge" class="text-sky-400 font-bold">0</strong></span>
+        </div>
+    </div>
+
+    <!-- Main Workspace Container -->
+    <main class="flex-1 p-4 lg:p-8 max-w-[1600px] mx-auto w-full space-y-6">
+
+        <!-- Banner Alert / Info -->
+        <div id="statusAlert" class="hidden rounded-xl p-4 border text-xs flex items-center justify-between gap-4 transition-all">
+            <div class="flex items-center gap-3">
+                <i id="statusIcon" class="fa-solid fa-circle-info text-base"></i>
+                <span id="statusAlertMsg">알림 메시지</span>
+            </div>
+            <button onclick="dismissAlert()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+
+        <!-- Top KPI Metric Cards Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="kpiContainer">
+            <!-- Loading Skeletons -->
+            <div class="glass-card rounded-2xl p-5 animate-pulse flex items-center justify-between">
+                <div class="space-y-2">
+                    <div class="h-3 w-20 bg-slate-700 rounded"></div>
+                    <div class="h-6 w-32 bg-slate-600 rounded"></div>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-slate-700"></div>
+            </div>
+            <div class="glass-card rounded-2xl p-5 animate-pulse flex items-center justify-between">
+                <div class="space-y-2">
+                    <div class="h-3 w-20 bg-slate-700 rounded"></div>
+                    <div class="h-6 w-32 bg-slate-600 rounded"></div>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-slate-700"></div>
+            </div>
+            <div class="glass-card rounded-2xl p-5 animate-pulse flex items-center justify-between">
+                <div class="space-y-2">
+                    <div class="h-3 w-20 bg-slate-700 rounded"></div>
+                    <div class="h-6 w-32 bg-slate-600 rounded"></div>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-slate-700"></div>
+            </div>
+            <div class="glass-card rounded-2xl p-5 animate-pulse flex items-center justify-between">
+                <div class="space-y-2">
+                    <div class="h-3 w-20 bg-slate-700 rounded"></div>
+                    <div class="h-6 w-32 bg-slate-600 rounded"></div>
+                </div>
+                <div class="w-12 h-12 rounded-xl bg-slate-700"></div>
+            </div>
+        </div>
+
+        <!-- Interactive Infographics & Charts Row 1 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Primary Bar / Column Chart -->
+            <div class="glass-card rounded-2xl p-5 lg:col-span-2 flex flex-col justify-between relative overflow-hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-column text-sky-400"></i>
+                            <span id="chart1Title">카테고리별 측정 결과 비교</span>
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">선택한 그룹 기준의 상위 데이터 항목별 합계 및 수치 비교</p>
+                    </div>
+                    <div class="flex items-center gap-1 bg-slate-900/80 rounded-lg p-1 border border-slate-800">
+                        <button onclick="setChartType('chart1', 'bar')" class="px-2 py-1 text-xs rounded text-slate-300 hover:bg-slate-800 hover:text-white transition active-chart-type"><i class="fa-solid fa-chart-simple"></i></button>
+                        <button onclick="setChartType('chart1', 'line')" class="px-2 py-1 text-xs rounded text-slate-400 hover:bg-slate-800 hover:text-white transition"><i class="fa-solid fa-chart-line"></i></button>
+                    </div>
+                </div>
+                <div class="h-72 w-full relative">
+                    <canvas id="mainChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Doughnut / Pie Share Distribution -->
+            <div class="glass-card rounded-2xl p-5 flex flex-col justify-between">
+                <div class="flex items-center justify-between mb-2">
+                    <div>
+                        <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                            <i class="fa-solid fa-chart-pie text-indigo-400"></i>
+                            <span id="chart2Title">점유율 및 비중 분석</span>
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">상위 항목의 상대적 비율 구성</p>
+                    </div>
+                </div>
+                <div class="h-64 w-full relative my-auto flex items-center justify-center">
+                    <canvas id="doughnutChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Infographics Row 2: Leaderboard & Dynamic Distribution -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Top Leaderboard / Ranking Progress List -->
+            <div class="glass-card rounded-2xl p-5 flex flex-col">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                            <i class="fa-solid fa-trophy text-amber-400"></i>
+                            <span>상위 순위 리더보드</span>
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">가장 높거나 비중이 큰 TOP 5 리스트</p>
+                    </div>
+                    <span class="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-medium">Rankings</span>
+                </div>
+                <div id="leaderboardList" class="space-y-3 flex-1 overflow-y-auto max-h-[320px] pr-1 custom-scrollbar">
+                    <!-- Dynamic rendering -->
+                    <div class="text-center py-8 text-xs text-slate-500">데이터 로딩 중...</div>
+                </div>
+            </div>
+
+            <!-- Trend/Distribution Line Area Chart -->
+            <div class="glass-card rounded-2xl p-5 lg:col-span-2 flex flex-col justify-between">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                            <i class="fa-solid fa-arrow-trend-up text-emerald-400"></i>
+                            <span>전체 데이터 분포 및 레코드 흐름</span>
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">행 단위별 측정값 변화 흐름 및 평균선</p>
+                    </div>
+                </div>
+                <div class="h-64 w-full relative">
+                    <canvas id="trendChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Interactive Data Table & Explorer -->
+        <div class="glass-card rounded-2xl p-5">
+            <div class="flex flex-wrap items-center justify-between gap-4 mb-4">
+                <div>
+                    <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-table text-sky-400"></i>
+                        <span>원본 데이터 상세 탐색기</span>
+                    </h2>
+                    <p class="text-xs text-slate-400 mt-0.5">실시간 구글 시트 데이터셋 행/열 정렬 및 검색</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="exportCSV()" class="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg transition">
+                        <i class="fa-solid fa-file-csv text-emerald-400"></i>
+                        <span>CSV 다운로드</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Table Container -->
+            <div class="overflow-x-auto rounded-xl border border-slate-800 custom-scrollbar">
+                <table class="w-full text-xs text-left text-slate-300">
+                    <thead id="tableHead" class="bg-slate-900/80 text-slate-400 uppercase text-[11px] font-semibold tracking-wider border-b border-slate-800">
+                        <tr>
+                            <th class="py-3 px-4">로딩 중...</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="divide-y divide-slate-800/60 bg-slate-900/30">
+                        <tr>
+                            <td class="py-8 text-center text-slate-500">데이터를 불러오는 중입니다...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination Controls -->
+            <div class="flex flex-wrap items-center justify-between gap-4 mt-4 pt-2 text-xs text-slate-400">
+                <div class="flex items-center gap-2">
+                    <span>표시 개수:</span>
+                    <select id="pageSizeSelect" onchange="changePageSize()" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 outline-none">
+                        <option value="10">10개씩</option>
+                        <option value="25" selected>25개씩</option>
+                        <option value="50">50개씩</option>
+                        <option value="100">100개씩</option>
+                    </select>
+                    <span id="pageRangeInfo" class="ml-2 text-slate-500">1 - 25 / 총 0개</span>
+                </div>
+
+                <div class="flex items-center gap-1">
+                    <button id="prevPageBtn" onclick="prevPage()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition">
+                        <i class="fa-solid fa-chevron-left"></i>
+                    </button>
+                    <span id="currentPageNum" class="px-3 font-semibold text-slate-200">1</span>
+                    <button id="nextPageBtn" onclick="nextPage()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:hover:bg-slate-800 transition">
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Google Sheet URL Settings Modal -->
+    <div id="urlModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="glass-card rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-700/80 relative">
+            <button onclick="toggleUrlModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            <div class="flex items-center gap-3">
+                <div class="p-2.5 bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded-xl">
+                    <i class="fa-solid fa-link text-lg"></i>
+                </div>
+                <div>
+                    <h3 class="text-base font-bold text-white">구글 시트 게시 URL 설정</h3>
+                    <p class="text-xs text-slate-400">웹에 게시된 CSV 형태의 스프레드시트 링크를 등록하세요</p>
+                </div>
+            </div>
+
+            <div class="space-y-2">
+                <label class="text-xs font-medium text-slate-300">Google Sheet CSV URL</label>
+                <input type="text" id="csvUrlInput" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-xs text-slate-200 focus:outline-none focus:border-sky-500 transition font-mono" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv">
+                <p class="text-[11px] text-slate-400 leading-relaxed">
+                    💡 <strong>스프레드시트 게시 방법:</strong> 구글 시트 메뉴에서 <code class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">파일 > 공유 > 웹에 게시</code> 선택 후 <code class="bg-slate-800 px-1 py-0.5 rounded text-sky-300">쉼표로 구분된 값(.csv)</code> 형식으로 게시한 링크를 입력합니다.
+                </p>
+            </div>
+
+            <div class="pt-2 flex justify-end gap-2">
+                <button onclick="toggleUrlModal()" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:bg-slate-800 transition">취소</button>
+                <button onclick="saveAndFetchUrl()" class="px-4 py-2 rounded-xl text-xs font-medium bg-sky-600 hover:bg-sky-500 text-white shadow-lg shadow-sky-600/20 transition">저장 및 동기화</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Default target URL provided by user
+        let currentCsvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vTTYY0q0lmX6Ain74W2r7ZLQU_1RNv3ymfhaGDfWfojixzqYY-0vSC6dPau66a9BNycmLCU98Zpa-uP/pub?output=csv';
+
+        // Global State
+        let rawData = [];
+        let filteredData = [];
+        let headers = [];
+        let numericColumns = [];
+        let categoryColumns = [];
+        let refreshTimer = null;
+
+        // Chart instances
+        let mainChartInstance = null;
+        let doughnutChartInstance = null;
+        let trendChartInstance = null;
+        let currentChart1Type = 'bar';
+
+        // Pagination State
+        let currentPage = 1;
+        let pageSize = 25;
+        let sortColumn = null;
+        let sortAsc = true;
+
+        // Initialize on DOM Ready
+        window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('csvUrlInput').value = currentCsvUrl;
+            setupAutoRefresh();
+            fetchLiveData();
+        });
+
+        // Toggle Modal Visibility
+        function toggleUrlModal() {
+            const modal = document.getElementById('urlModal');
+            modal.classList.toggle('hidden');
+        }
+
+        // Save URL from Modal and Trigger Reload
+        function saveAndFetchUrl() {
+            const newUrl = document.getElementById('csvUrlInput').value.trim();
+            if (!newUrl) {
+                showAlert('유효한 CSV URL을 입력해주세요.', 'error');
+                return;
+            }
+            currentCsvUrl = newUrl;
+            toggleUrlModal();
+            fetchLiveData();
+        }
+
+        // Auto Refresh Interval Setup
+        document.getElementById('autoRefreshInterval').addEventListener('change', setupAutoRefresh);
+
+        function setupAutoRefresh() {
+            if (refreshTimer) clearInterval(refreshTimer);
+            const interval = parseInt(document.getElementById('autoRefreshInterval').value);
+            if (interval > 0) {
+                refreshTimer = setInterval(() => {
+                    fetchLiveData(true);
+                }, interval);
+            }
+        }
+
+        // Display Notification Banners
+        function showAlert(msg, type = 'info') {
+            const alertEl = document.getElementById('statusAlert');
+            const iconEl = document.getElementById('statusIcon');
+            const msgEl = document.getElementById('statusAlertMsg');
+
+            alertEl.classList.remove('hidden', 'bg-sky-500/10', 'border-sky-500/30', 'text-sky-300', 'bg-rose-500/10', 'border-rose-500/30', 'text-rose-300', 'bg-emerald-500/10', 'border-emerald-500/30', 'text-emerald-300');
+
+            if (type === 'error') {
+                alertEl.classList.add('bg-rose-500/10', 'border-rose-500/30', 'text-rose-300');
+                iconEl.className = 'fa-solid fa-circle-exclamation text-rose-400 text-base';
+            } else if (type === 'success') {
+                alertEl.classList.add('bg-emerald-500/10', 'border-emerald-500/30', 'text-emerald-300');
+                iconEl.className = 'fa-solid fa-circle-check text-emerald-400 text-base';
+            } else {
+                alertEl.classList.add('bg-sky-500/10', 'border-sky-500/30', 'text-sky-300');
+                iconEl.className = 'fa-solid fa-circle-info text-sky-400 text-base';
+            }
+
+            msgEl.textContent = msg;
+        }
+
+        function dismissAlert() {
+            document.getElementById('statusAlert').classList.add('hidden');
+        }
+
+        // Main Fetch Function
+        async function fetchLiveData(isBackground = false) {
+            const refreshIcon = document.getElementById('refreshIcon');
+            const syncBadge = document.getElementById('syncBadge');
+            const syncStatusText = document.getElementById('syncStatusText');
+
+            refreshIcon.classList.add('fa-spin');
+            syncStatusText.textContent = '동기화 중...';
+            syncBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20';
+
+            try {
+                // Add timestamp cache buster to prevent cached responses
+                const fetchUrl = currentCsvUrl + (currentCsvUrl.includes('?') ? '&' : '?') + '_t=' + Date.now();
+                const response = await fetch(fetchUrl);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP Error: ${response.status}`);
+                }
+
+                const csvText = await response.text();
+                parseCsvData(csvText);
+
+                // Update timestamps & Status
+                const now = new Date();
+                document.getElementById('lastUpdatedTime').textContent = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                syncStatusText.textContent = '동기화 완료';
+                syncBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+
+                if (!isBackground) {
+                    showAlert('최신 구글 시트 데이터를 성공적으로 연동하였습니다.', 'success');
+                }
+
+            } catch (err) {
+                console.warn('Fetch error, trying CORS proxy or fallback dataset:', err);
+                // Attempt fetching via open proxy if direct fetch failed
+                try {
+                    const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(currentCsvUrl);
+                    const proxyRes = await fetch(proxyUrl);
+                    if (proxyRes.ok) {
+                        const proxyText = await proxyRes.text();
+                        parseCsvData(proxyText);
+                        syncStatusText.textContent = '프록시 연결됨';
+                        syncBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20';
+                        return;
+                    }
+                } catch (proxyErr) {
+                    console.error('Proxy failed as well:', proxyErr);
+                }
+
+                syncStatusText.textContent = '연동 오류';
+                syncBadge.className = 'inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/20';
+                showAlert('구글 시트 연동 중 오류가 발생했습니다. 데모 데이터로 시각화합니다.', 'error');
+
+                // Fallback Sample Data if network fails
+                loadFallbackSampleData();
+            } finally {
+                refreshIcon.classList.remove('fa-spin');
+            }
+        }
+
+        // CSV Parsing & Schema Discovery Engine
+        function parseCsvData(csvContent) {
+            Papa.parse(csvContent, {
+                header: true,
+                skipEmptyLines: true,
+                dynamicTyping: true,
+                complete: function (results) {
+                    if (!results.data || results.data.length === 0) {
+                        showAlert('CSV 데이터가 비어있습니다.', 'error');
+                        return;
+                    }
+
+                    rawData = results.data;
+                    headers = Object.keys(rawData[0]);
+
+                    // Analyze column types (Numeric vs Categorical)
+                    detectColumnTypes();
+                    populateColumnSelectors();
+
+                    // Apply filters and render UI
+                    applyFilters();
+                },
+                error: function (error) {
+                    showAlert('CSV 파싱 중 오류가 발생했습니다: ' + error.message, 'error');
+                }
+            });
+        }
+
+        // Column Data Type Profiling
+        function detectColumnTypes() {
+            numericColumns = [];
+            categoryColumns = [];
+
+            if (rawData.length === 0) return;
+
+            headers.forEach(header => {
+                let numericCount = 0;
+                let sampleSize = Math.min(rawData.length, 50);
+
+                for (let i = 0; i < sampleSize; i++) {
+                    const val = rawData[i][header];
+                    if (val !== null && val !== undefined && val !== '') {
+                        // Check if numeric or cleanable numeric string
+                        const cleanedVal = String(val).replace(/[\$,%]/g, '').trim();
+                        if (!isNaN(Number(cleanedVal))) {
+                            numericCount++;
+                        }
+                    }
+                }
+
+                if (numericCount / sampleSize > 0.6) {
+                    numericColumns.push(header);
+                } else {
+                    categoryColumns.push(header);
+                }
+            });
+
+            // Fallback if no category or no numeric columns found
+            if (categoryColumns.length === 0 && headers.length > 0) {
+                categoryColumns.push(headers[0]);
+            }
+            if (numericColumns.length === 0 && headers.length > 1) {
+                numericColumns.push(headers[1] || headers[0]);
+            }
+        }
+
+        // Populate Select Dropdowns for Grouping and Metric
+        function populateColumnSelectors() {
+            const groupSelect = document.getElementById('groupColumnSelect');
+            const metricSelect = document.getElementById('metricColumnSelect');
+
+            const currentGroup = groupSelect.value;
+            const currentMetric = metricSelect.value;
+
+            groupSelect.innerHTML = '';
+            metricSelect.innerHTML = '';
+
+            // Grouping dropdown (prioritize text/category columns)
+            headers.forEach(h => {
+                const opt = document.createElement('option');
+                opt.value = h;
+                opt.textContent = h + (categoryColumns.includes(h) ? ' (분류)' : '');
+                groupSelect.appendChild(opt);
+            });
+
+            // Metric dropdown (prioritize numeric columns)
+            headers.forEach(h => {
+                const opt = document.createElement('option');
+                opt.value = h;
+                opt.textContent = h + (numericColumns.includes(h) ? ' (수치)' : '');
+                metricSelect.appendChild(opt);
+            });
+
+            // Select smart defaults
+            if (currentGroup && headers.includes(currentGroup)) {
+                groupSelect.value = currentGroup;
+            } else if (categoryColumns.length > 0) {
+                groupSelect.value = categoryColumns[0];
+            } else {
+                groupSelect.value = headers[0];
+            }
+
+            if (currentMetric && headers.includes(currentMetric)) {
+                metricSelect.value = currentMetric;
+            } else if (numericColumns.length > 0) {
+                metricSelect.value = numericColumns[0];
+            } else {
+                metricSelect.value = headers[headers.length - 1];
+            }
+        }
+
+        function onAxisChange() {
+            updateDashboardVisuals();
+        }
+
+        // Filter & Search Engine
+        function applyFilters() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase().trim();
+
+            if (!searchTerm) {
+                filteredData = [...rawData];
+            } else {
+                filteredData = rawData.filter(row => {
+                    return headers.some(h => {
+                        const val = row[h];
+                        return val !== null && val !== undefined && String(val).toLowerCase().includes(searchTerm);
+                    });
+                });
+            }
+
+            document.getElementById('rowCountBadge').textContent = filteredData.length.toLocaleString();
+            currentPage = 1;
+
+            updateDashboardVisuals();
+            renderTable();
+        }
+
+        // Main Dashboard Visual Update Controller
+        function updateDashboardVisuals() {
+            const groupCol = document.getElementById('groupColumnSelect').value;
+            const metricCol = document.getElementById('metricColumnSelect').value;
+
+            renderKPIs(metricCol, groupCol);
+            renderCharts(groupCol, metricCol);
+            renderLeaderboard(groupCol, metricCol);
+        }
+
+        // Render KPI Summary Cards
+        function renderKPIs(metricCol, groupCol) {
+            const kpiContainer = document.getElementById('kpiContainer');
+
+            // Extract numeric values for selected metric
+            const values = filteredData
+                .map(r => parseNumeric(r[metricCol]))
+                .filter(v => !isNaN(v));
+
+            const totalSum = values.reduce((a, b) => a + b, 0);
+            const avgVal = values.length > 0 ? totalSum / values.length : 0;
+            const maxVal = values.length > 0 ? Math.max(...values) : 0;
+
+            // Unique categories count
+            const uniqueGroups = new Set(filteredData.map(r => String(r[groupCol] || '미지정')));
+
+            kpiContainer.innerHTML = `
+                <!-- KPI Card 1: Total Metric Sum -->
+                <div class="glass-card rounded-2xl p-5 flex items-center justify-between shadow-lg relative overflow-hidden group">
+                    <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-sky-500/10 rounded-full blur-xl group-hover:bg-sky-500/20 transition"></div>
+                    <div>
+                        <p class="text-xs font-medium text-slate-400 mb-1">${escapeHtml(metricCol)} 총합</p>
+                        <h3 class="text-2xl font-bold text-white tracking-tight">${formatNumber(totalSum)}</h3>
+                        <p class="text-[11px] text-sky-400 mt-1 flex items-center gap-1">
+                            <i class="fa-solid fa-calculator text-[10px]"></i> 전체 합계 지표
+                        </p>
+                    </div>
+                    <div class="p-3.5 bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded-2xl">
+                        <i class="fa-solid fa-coins text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- KPI Card 2: Average -->
+                <div class="glass-card rounded-2xl p-5 flex items-center justify-between shadow-lg relative overflow-hidden group">
+                    <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl group-hover:bg-indigo-500/20 transition"></div>
+                    <div>
+                        <p class="text-xs font-medium text-slate-400 mb-1">${escapeHtml(metricCol)} 평균</p>
+                        <h3 class="text-2xl font-bold text-white tracking-tight">${formatNumber(avgVal)}</h3>
+                        <p class="text-[11px] text-indigo-400 mt-1 flex items-center gap-1">
+                            <i class="fa-solid fa-chart-line text-[10px]"></i> 레코드 당 평균
+                        </p>
+                    </div>
+                    <div class="p-3.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-2xl">
+                        <i class="fa-solid fa-scale-balanced text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- KPI Card 3: Maximum Value -->
+                <div class="glass-card rounded-2xl p-5 flex items-center justify-between shadow-lg relative overflow-hidden group">
+                    <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-amber-500/10 rounded-full blur-xl group-hover:bg-amber-500/20 transition"></div>
+                    <div>
+                        <p class="text-xs font-medium text-slate-400 mb-1">최대 수치 (Max)</p>
+                        <h3 class="text-2xl font-bold text-white tracking-tight">${formatNumber(maxVal)}</h3>
+                        <p class="text-[11px] text-amber-400 mt-1 flex items-center gap-1">
+                            <i class="fa-solid fa-arrow-up-right-dots text-[10px]"></i> 최고 실적 단일 행
+                        </p>
+                    </div>
+                    <div class="p-3.5 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-2xl">
+                        <i class="fa-solid fa-circle-arrow-up text-xl"></i>
+                    </div>
+                </div>
+
+                <!-- KPI Card 4: Category Diversity -->
+                <div class="glass-card rounded-2xl p-5 flex items-center justify-between shadow-lg relative overflow-hidden group">
+                    <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition"></div>
+                    <div>
+                        <p class="text-xs font-medium text-slate-400 mb-1">${escapeHtml(groupCol)} 고유 그룹</p>
+                        <h3 class="text-2xl font-bold text-white tracking-tight">${uniqueGroups.size.toLocaleString()} <span class="text-xs font-normal text-slate-400">개</span></h3>
+                        <p class="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
+                            <i class="fa-solid fa-cubes text-[10px]"></i> 고유 범주 항목 개수
+                        </p>
+                    </div>
+                    <div class="p-3.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-2xl">
+                        <i class="fa-solid fa-layer-group text-xl"></i>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Render Chart.js Visualizations
+        function renderCharts(groupCol, metricCol) {
+            // Aggregate values by Group Column
+            const aggregated = {};
+
+            filteredData.forEach(row => {
+                const key = String(row[groupCol] || 'N/A').trim();
+                const val = parseNumeric(row[metricCol]);
+
+                if (!aggregated[key]) {
+                    aggregated[key] = { sum: 0, count: 0 };
+                }
+                aggregated[key].sum += isNaN(val) ? 0 : val;
+                aggregated[key].count += 1;
+            });
+
+            // Sort aggregated entries by sum descending
+            const sortedKeys = Object.keys(aggregated).sort((a, b) => aggregated[b].sum - aggregated[a].sum);
+
+            // Take Top 10 for clean chart visuals
+            const topKeys = sortedKeys.slice(0, 10);
+            const chartLabels = topKeys;
+            const chartData = topKeys.map(k => aggregated[k].sum);
+
+            // 1. Render Main Bar / Line Chart
+            document.getElementById('chart1Title').textContent = `${groupCol}별 ${metricCol} 비교`;
+            const mainCtx = document.getElementById('mainChart').getContext('2d');
+
+            if (mainChartInstance) mainChartInstance.destroy();
+
+            const skyGradient = mainCtx.createLinearGradient(0, 0, 0, 300);
+            skyGradient.addColorStop(0, 'rgba(14, 165, 233, 0.8)');
+            skyGradient.addColorStop(1, 'rgba(14, 165, 233, 0.05)');
+
+            mainChartInstance = new Chart(mainCtx, {
+                type: currentChart1Type,
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        label: metricCol + ' 합계',
+                        data: chartData,
+                        backgroundColor: currentChart1Type === 'line' ? skyGradient : 'rgba(14, 165, 233, 0.75)',
+                        borderColor: '#0ea5e9',
+                        borderWidth: 2,
+                        borderRadius: 8,
+                        fill: currentChart1Type === 'line',
+                        tension: 0.35
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                            titleFont: { size: 12, weight: 'bold' },
+                            bodyFont: { size: 12 },
+                            padding: 10,
+                            borderColor: 'rgba(255,255,255,0.1)',
+                            borderWidth: 1
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#94a3b8', font: { size: 11 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#94a3b8', font: { size: 11 } }
+                        }
+                    }
+                }
+            });
+
+            // 2. Render Doughnut Share Chart
+            document.getElementById('chart2Title').textContent = `${groupCol} 기준 비중 구성`;
+            const doughnutCtx = document.getElementById('doughnutChart').getContext('2d');
+
+            if (doughnutChartInstance) doughnutChartInstance.destroy();
+
+            const palette = [
+                '#38bdf8', '#818cf8', '#a78bfa', '#f472b6', '#34d399',
+                '#fbbf24', '#f87171', '#94a3b8', '#38cae8', '#6366f1'
+            ];
+
+            doughnutChartInstance = new Chart(doughnutCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: chartLabels.slice(0, 6),
+                    datasets: [{
+                        data: chartData.slice(0, 6),
+                        backgroundColor: palette.slice(0, 6),
+                        borderWidth: 2,
+                        borderColor: '#0f172a'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { color: '#cbd5e1', font: { size: 11 }, boxWidth: 12 }
+                        }
+                    },
+                    cutout: '68%'
+                }
+            });
+
+            // 3. Render Trend / Record Flow Line Chart
+            const trendCtx = document.getElementById('trendChart').getContext('2d');
+            if (trendChartInstance) trendChartInstance.destroy();
+
+            // Sample step intervals for trend line if too many rows
+            const step = Math.max(1, Math.floor(filteredData.length / 30));
+            const trendLabels = [];
+            const trendValues = [];
+
+            for (let i = 0; i < filteredData.length; i += step) {
+                trendLabels.push(`#${i + 1}`);
+                trendValues.push(parseNumeric(filteredData[i][metricCol]) || 0);
+            }
+
+            trendChartInstance = new Chart(trendCtx, {
+                type: 'line',
+                data: {
+                    labels: trendLabels,
+                    datasets: [{
+                        label: metricCol + ' 변화 추이',
+                        data: trendValues,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                        borderWidth: 2,
+                        fill: true,
+                        pointRadius: trendValues.length > 20 ? 0 : 3,
+                        pointHoverRadius: 5,
+                        tension: 0.25
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 10 } } },
+                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', font: { size: 10 } } }
+                    }
+                }
+            });
+        }
+
+        function setChartType(chartId, type) {
+            currentChart1Type = type;
+            const groupCol = document.getElementById('groupColumnSelect').value;
+            const metricCol = document.getElementById('metricColumnSelect').value;
+            renderCharts(groupCol, metricCol);
+        }
+
+        // Render Top Leaderboard List
+        function renderLeaderboard(groupCol, metricCol) {
+            const container = document.getElementById('leaderboardList');
+
+            const aggregated = {};
+            let maxTotal = 0;
+
+            filteredData.forEach(row => {
+                const key = String(row[groupCol] || '미지정').trim();
+                const val = parseNumeric(row[metricCol]);
+                if (!aggregated[key]) aggregated[key] = 0;
+                aggregated[key] += isNaN(val) ? 0 : val;
+            });
+
+            const sorted = Object.entries(aggregated).sort((a, b) => b[1] - a[1]);
+            if (sorted.length > 0) maxTotal = sorted[0][1];
+
+            if (sorted.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-xs text-slate-500">표시할 데이터가 없습니다.</div>`;
+                return;
+            }
+
+            const medalIcons = [
+                '<i class="fa-solid fa-crown text-amber-400"></i>',
+                '<i class="fa-solid fa-medal text-slate-300"></i>',
+                '<i class="fa-solid fa-award text-amber-600"></i>'
+            ];
+
+            container.innerHTML = sorted.slice(0, 5).map(([name, sum], index) => {
+                const pct = maxTotal > 0 ? Math.min(100, Math.round((sum / maxTotal) * 100)) : 0;
+                const badge = index < 3 ? medalIcons[index] : `<span class="text-xs font-bold text-slate-500">${index + 1}</span>`;
+
+                return `
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-3 space-y-2">
+                        <div class="flex items-center justify-between text-xs">
+                            <div class="flex items-center gap-2.5 truncate max-w-[70%]">
+                                <div class="w-6 h-6 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
+                                    ${badge}
+                                </div>
+                                <span class="font-semibold text-slate-200 truncate">${escapeHtml(name)}</span>
+                            </div>
+                            <span class="font-bold text-sky-400">${formatNumber(sum)}</span>
+                        </div>
+                        <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                            <div class="bg-gradient-to-r from-sky-500 to-indigo-500 h-full rounded-full transition-all duration-500" style="width: ${pct}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Data Table Renderer
+        function renderTable() {
+            const tHead = document.getElementById('tableHead');
+            const tBody = document.getElementById('tableBody');
+
+            if (headers.length === 0) {
+                tHead.innerHTML = `<tr><th class="py-3 px-4">컬럼 정보 없음</th></tr>`;
+                tBody.innerHTML = `<tr><td class="py-4 text-center">데이터가 로드되지 않았습니다.</td></tr>`;
+                return;
+            }
+
+            // Render Table Header with Sorting Icons
+            tHead.innerHTML = `
+                <tr>
+                    <th class="py-3 px-3 text-slate-500 font-normal text-[10px] w-12 text-center">#</th>
+                    ${headers.map(h => `
+                        <th onclick="sortTable('${escapeHtml(h)}')" class="py-3 px-4 cursor-pointer hover:bg-slate-800/80 transition select-none">
+                            <div class="flex items-center justify-between gap-1">
+                                <span>${escapeHtml(h)}</span>
+                                <i class="fa-solid ${sortColumn === h ? (sortAsc ? 'fa-sort-up text-sky-400' : 'fa-sort-down text-sky-400') : 'fa-sort text-slate-600 text-[10px]'}"></i>
+                            </div>
+                        </th>
+                    `).join('')}
+                </tr>
+            `;
+
+            // Sort filtered data if sorting is active
+            let displayData = [...filteredData];
+            if (sortColumn) {
+                displayData.sort((a, b) => {
+                    let valA = a[sortColumn];
+                    let valB = b[sortColumn];
+
+                    let numA = parseNumeric(valA);
+                    let numB = parseNumeric(valB);
+
+                    if (!isNaN(numA) && !isNaN(numB)) {
+                        return sortAsc ? numA - numB : numB - numA;
+                    }
+
+                    valA = String(valA || '').toLowerCase();
+                    valB = String(valB || '').toLowerCase();
+                    if (valA < valB) return sortAsc ? -1 : 1;
+                    if (valA > valB) return sortAsc ? 1 : -1;
+                    return 0;
+                });
+            }
+
+            // Paginate
+            const totalRows = displayData.length;
+            const totalPages = Math.ceil(totalRows / pageSize) || 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+
+            const startIdx = (currentPage - 1) * pageSize;
+            const pageData = displayData.slice(startIdx, startIdx + pageSize);
+
+            // Render Table Body
+            if (pageData.length === 0) {
+                tBody.innerHTML = `<tr><td colspan="${headers.length + 1}" class="py-8 text-center text-slate-500">검색 조건에 일치하는 데이터가 없습니다.</td></tr>`;
+            } else {
+                tBody.innerHTML = pageData.map((row, idx) => `
+                    <tr class="hover:bg-slate-800/40 transition">
+                        <td class="py-2.5 px-3 text-slate-500 text-center font-mono text-[10px]">${startIdx + idx + 1}</td>
+                        ${headers.map(h => {
+                            const val = row[h];
+                            const num = parseNumeric(val);
+                            const isNum = !isNaN(num) && numericColumns.includes(h);
+
+                            return `
+                                <td class="py-2.5 px-4 whitespace-nowrap ${isNum ? 'font-mono text-slate-200 font-medium' : 'text-slate-300'}">
+                                    ${isNum ? formatNumber(num) : escapeHtml(val !== null && val !== undefined ? String(val) : '-')}
+                                </td>
+                            `;
+                        }).join('')}
+                    </tr>
+                `).join('');
+            }
+
+            // Pagination Controls Update
+            document.getElementById('currentPageNum').textContent = currentPage;
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+
+            const endIdx = Math.min(startIdx + pageSize, totalRows);
+            document.getElementById('pageRangeInfo').textContent = `${totalRows > 0 ? startIdx + 1 : 0} - ${endIdx} / 총 ${totalRows.toLocaleString()}개`;
+        }
+
+        // Table Action Handlers
+        function sortTable(col) {
+            if (sortColumn === col) {
+                sortAsc = !sortAsc;
+            } else {
+                sortColumn = col;
+                sortAsc = true;
+            }
+            renderTable();
+        }
+
+        function nextPage() {
+            currentPage++;
+            renderTable();
+        }
+
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                renderTable();
+            }
+        }
+
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            currentPage = 1;
+            renderTable();
+        }
+
+        // Utility Functions
+        function parseNumeric(val) {
+            if (val === null || val === undefined) return NaN;
+            if (typeof val === 'number') return val;
+            const cleaned = String(val).replace(/[\$,%]/g, '').trim();
+            return cleaned === '' ? NaN : Number(cleaned);
+        }
+
+        function formatNumber(num) {
+            if (isNaN(num)) return '-';
+            if (Math.abs(num) >= 1000000) {
+                return (num / 1000000).toFixed(2) + 'M';
+            }
+            if (Number.isInteger(num)) {
+                return num.toLocaleString('ko-KR');
+            }
+            return num.toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // CSV Export Function
+        function exportCSV() {
+            if (filteredData.length === 0) {
+                showAlert('내보낼 데이터가 없습니다.', 'error');
+                return;
+            }
+
+            const csv = Papa.unparse(filteredData);
+            const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `dashboard_export_${Date.now()}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Fallback Mock Data Loader
+        function loadFallbackSampleData() {
+            const sampleCsv = `카테고리,지역,담당자,매출액,목표달성률,클라이언트수
+전자제품,서울,김철수,15000000,95%,42
+전자제품,경기,이영희,12500000,88%,35
+가공식품,부산,박민수,8900000,102%,58
+가공식품,서울,최수진,11200000,91%,49
+의류/패션,대구,정우성,6700000,78%,29
+의류/패션,서울,김태희,14300000,110%,64
+생활용품,광주,강동원,5400000,85%,31
+생활용품,경기,한효주,9800000,96%,45`;
+
+            parseCsvData(sampleCsv);
+        }
+    </script>
+</body>
+</html>
